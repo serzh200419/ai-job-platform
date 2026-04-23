@@ -100,6 +100,7 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_PROMPT_ID = os.environ.get("OPENAI_PROMPT_ID", "")
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

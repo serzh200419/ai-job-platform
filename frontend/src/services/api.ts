@@ -193,6 +193,13 @@ export const getMatches = () =>
 export const refreshMatches = () =>
   api.post<MatchesResponse>('/matches/refresh/').then((r) => r.data)
 
+// Cache-first recommended jobs (auto-triggers AI on cache miss)
+export const getRecommended = () =>
+  api.get<MatchesResponse>('/jobs/recommended/').then((r) => r.data)
+
+export const refreshRecommended = () =>
+  api.post<MatchesResponse>('/jobs/recommended/refresh/').then((r) => r.data)
+
 // ── Chat ──────────────────────────────────────────────────────────────────────
 
 export const createChatSession = () =>

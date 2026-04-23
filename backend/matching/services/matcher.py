@@ -1,75 +1,69 @@
-import json
 import logging
-import time
-from decimal import Decimal
 
-import openai
-from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
+
+from .openai_matcher import match_jobs
 
 logger = logging.getLogger(__name__)
 
-MATCHING_PROMPT = """You are an expert job matching AI. Evaluate how well a candidate's profile matches each job posting.
-
-Candidate Profile:
-{candidate_json}
-
-Jobs to evaluate:
-{jobs_json}
-
-Instructions:
-- Compare skills overlap, years of experience, profession alignment, salary fit, and location/remote preferences.
-- Score each job from 0 to 100 (100 = perfect match).
-- Only include strong matches with a score >= 50.
-- Return at most the top 5 jobs, sorted by score descending.
-- For each match write a short reason (max 15 words) explaining why it is a good fit.
-
-Return ONLY a valid JSON object in this exact format, no extra text:
-{{
-  "results": [
-    {{"job_id": "<uuid>", "match_score": 85, "reason": "Strong Python/Django skills match; remote role fits location preference"}},
-    {{"job_id": "<uuid>", "match_score": 72, "reason": "Relevant experience; salary range aligns with expectations"}}
-  ]
-}}
-"""
-
 MAX_JOBS_TO_AI = 15
+MATCH_CACHE_HOURS = 1   # minimum interval between AI calls (prevents spam)
+STALE_HOURS = 24        # matches older than this are considered stale by callers
 
+
+# ── Public helpers ────────────────────────────────────────────────────────────
+
+def is_cache_fresh(user, max_age_hours: int = STALE_HOURS) -> bool:
+    """
+    Return True if the user has at least one match computed within max_age_hours.
+    Cheap: single indexed query on (user, calculated_at).
+    """
+    from matching.models import JobMatch
+    latest = JobMatch.objects.filter(user=user).order_by("-calculated_at").first()
+    if not latest:
+        logger.debug("Cache check for user %s: no matches exist", user.id)
+        return False
+    age_seconds = (timezone.now() - latest.calculated_at).total_seconds()
+    fresh = age_seconds < max_age_hours * 3600
+    logger.debug(
+        "Cache check for user %s: age=%.0fm fresh=%s",
+        user.id, age_seconds / 60, fresh,
+    )
+    return fresh
+
+
+# ── Data builders ─────────────────────────────────────────────────────────────
 
 def _build_candidate_data(user):
-    """Serialize user profile, skills, and experience into a compact dict."""
-    profile = {}
-    if hasattr(user, "profile"):
-        p = user.profile
-        profile = {
-            "profession": p.profession,
-            "summary": p.summary,
-            "years_experience": p.years_experience,
-            "desired_salary": float(p.desired_salary) if p.desired_salary else None,
-            "location": p.location,
-        }
-
-    skills = [
-        {"name": s.skill_name, "level": s.skill_level}
-        for s in user.skills.all()
-    ]
-
-    experience = [
-        {
-            "company": e.company,
-            "position": e.position,
-            "description": e.description[:300],
-            "start_date": str(e.start_date),
-            "end_date": str(e.end_date) if e.end_date else None,
-        }
-        for e in user.experience.all()
-    ]
+    """Serialize user profile, skills, experience, and education into user_profile dict."""
+    p = user.profile if hasattr(user, "profile") else None
 
     return {
-        "name": user.full_name,
-        "profile": profile,
-        "skills": skills,
-        "experience": experience,
+        "profession":       p.profession        if p else "",
+        "summary":          p.summary           if p else "",
+        "years_experience": p.years_experience  if p else 0,
+        "desired_salary":   float(p.desired_salary) if (p and p.desired_salary) else None,
+        "location":         p.location          if p else "",
+        "skills": [
+            {"name": s.skill_name, "level": s.skill_level}
+            for s in user.skills.all()
+        ],
+        "experience": [
+            {
+                "company":     e.company,
+                "position":    e.position,
+                "description": e.description[:300],
+            }
+            for e in user.experience.all()
+        ],
+        "education": [
+            {
+                "degree": e.degree,
+                "field":  e.field_of_study,
+            }
+            for e in user.education.all()
+        ],
     }
 
 
@@ -78,7 +72,7 @@ def _build_jobs_data(jobs):
     result = []
     for job in jobs:
         result.append({
-            "id": str(job.id),
+            "job_id": str(job.id),
             "title": job.title,
             "company": job.company.name,
             "description": job.description[:500],
@@ -94,131 +88,71 @@ def _build_jobs_data(jobs):
 
 def _prefilter_jobs(user, jobs):
     """
-    Score and rank jobs by relevance before sending to OpenAI.
+    Rank jobs by relevance before sending to OpenAI. No hard exclusions.
 
-    Hard exclusion: salary_max < desired_salary * 0.7 (when both are set).
-    Relevance scoring:
-      +3 per overlapping skill name
-      +2 per profession word found in job title
-      +3 for location match, +2 for remote jobs
-      +1 if job salary_max >= desired_salary (salary fits)
+    Scoring (descending priority):
+      +3 per overlapping skill name          (primary signal)
+      +2 per profession word in job title    (strong signal)
+      +3 for matching location               (moderate)
+      +2 for remote job type                 (moderate)
+      +1 salary fit bonus                    (weak — only when both values present)
 
-    Returns top MAX_JOBS_TO_AI jobs sorted by relevance descending.
-    Ties preserve original fetch order (stable sort).
+    Salary NEVER excludes a job. NULL salary is treated as neutral.
+    Returns top MAX_JOBS_TO_AI jobs.
     """
-    desired_salary = None
-    user_location = ""
-    profession_words: set = set()
-
-    if hasattr(user, "profile"):
-        p = user.profile
-        if p.desired_salary:
-            desired_salary = p.desired_salary
-        if p.location:
-            user_location = p.location.lower()
-        if p.profession:
-            profession_words = {w for w in p.profession.lower().split() if len(w) > 2}
-
+    p = user.profile if hasattr(user, "profile") else None
+    desired_salary  = p.desired_salary if p else None
+    user_location   = p.location.lower() if (p and p.location) else ""
+    profession_words = (
+        {w for w in p.profession.lower().split() if len(w) > 2}
+        if (p and p.profession) else set()
+    )
     user_skills = {s.skill_name.lower() for s in user.skills.all()}
-    salary_floor = desired_salary * Decimal("0.7") if desired_salary else None
 
     scored = []
     for job in jobs:
-        # Hard exclusion
-        if salary_floor and job.salary_max is not None and job.salary_max < salary_floor:
-            continue
-
         relevance = 0
 
-        # Skill overlap
+        # Skills overlap (primary)
         job_skills = {s.skill_name.lower() for s in job.skills.all()}
         relevance += len(user_skills & job_skills) * 3
 
-        # Profession relevance (user profession words in job title)
+        # Title relevance (strong)
         if profession_words:
             title_words = set(job.title.lower().split())
             relevance += len(profession_words & title_words) * 2
 
-        # Location
+        # Location / job type
         if job.job_type == "remote":
             relevance += 2
         elif user_location and job.location and user_location in job.location.lower():
             relevance += 3
 
-        # Salary fit bonus
+        # Salary fit (weak bonus — only when both sides have a value)
         if desired_salary and job.salary_max and float(job.salary_max) >= float(desired_salary):
             relevance += 1
 
         scored.append((relevance, job))
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [job for _, job in scored[:MAX_JOBS_TO_AI]]
+    kept = [job for _, job in scored[:MAX_JOBS_TO_AI]]
+    logger.info("Pre-filter: %d jobs in, %d sent to AI (no salary exclusion)", len(jobs), len(kept))
+    return kept
 
 
-def call_openai_matching(prompt, max_retries=2):
-    """
-    Send the matching prompt to OpenAI and return the parsed results list.
+# ── Main entry point ──────────────────────────────────────────────────────────
 
-    Returns:
-        list[dict]: Each dict has "job_id" and "match_score" keys.
-
-    Raises:
-        openai.APIError: On unrecoverable API errors after retries.
-        ValueError: If the response cannot be parsed as expected JSON.
-    """
-    client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
-
-    for attempt in range(max_retries + 1):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a job matching AI. Always respond with valid JSON only.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content
-            data = json.loads(content)
-            return data.get("results", [])
-
-        except json.JSONDecodeError as exc:
-            logger.warning("OpenAI JSON parse error (attempt %d/%d): %s", attempt + 1, max_retries + 1, exc)
-            if attempt == max_retries:
-                raise ValueError(f"OpenAI returned non-JSON response: {exc}") from exc
-
-        except openai.RateLimitError:
-            logger.warning("OpenAI rate limit hit (attempt %d/%d)", attempt + 1, max_retries + 1)
-            if attempt == max_retries:
-                raise
-            time.sleep(2 ** attempt)
-
-        except openai.APIError as exc:
-            logger.error("OpenAI API error: %s", exc)
-            raise
-
-    return []
-
-
-def match_jobs_for_user(user_id):
+def match_jobs_for_user(user_id, force: bool = False):
     """
     Run AI-based job matching for the given user and persist results.
 
-    Steps:
-      1. Load user profile, skills, and experience.
-      2. Load the 20 most recent jobs with their skills.
-      3. Build a structured prompt and call OpenAI.
-      4. Parse the scored results and upsert JobMatch records.
-
     Args:
-        user_id: The primary key of the User to match.
+        user_id: Primary key of the User to match.
+        force:   If True, bypass the MATCH_CACHE_HOURS guard and always call
+                 OpenAI (used by the manual refresh endpoint).
 
     Returns:
-        list[JobMatch]: The saved/updated JobMatch instances, ordered by score desc.
+        list[JobMatch]: Saved instances ordered by score desc.
     """
     from users.models import User
     from jobs.models import Job
@@ -253,48 +187,86 @@ def match_jobs_for_user(user_id):
         logger.info("User %s has no profile data, skipping AI call", user_id)
         return []
 
+    # ── Short-interval cache guard (prevents re-calling AI within MATCH_CACHE_HOURS) ──
+    if not force:
+        latest_match = JobMatch.objects.filter(user=user).order_by("-calculated_at").first()
+        if latest_match:
+            age_seconds = (timezone.now() - latest_match.calculated_at).total_seconds()
+            if age_seconds < MATCH_CACHE_HOURS * 3600:
+                logger.info(
+                    "CACHE HIT (%.0fm old) for user %s — skipping AI call",
+                    age_seconds / 60, user_id,
+                )
+                return list(JobMatch.objects.filter(user=user).order_by("-match_score"))
+
     jobs = _prefilter_jobs(user, jobs)
 
     if not jobs:
         logger.info("No jobs remain after pre-filter for user %s", user_id)
         return []
 
-    candidate_data = _build_candidate_data(user)
-    jobs_data = _build_jobs_data(jobs)
+    # Build job_map immediately — same list that goes into the payload,
+    # so validation never compares against a different set.
+    job_map = {str(job.id): job for job in jobs}
 
-    prompt = MATCHING_PROMPT.format(
-        candidate_json=json.dumps(candidate_data, indent=2),
-        jobs_json=json.dumps(jobs_data, indent=2),
+    logger.info(
+        "Candidate set job_ids: %s",
+        list(job_map.keys()),
     )
 
-    logger.info("Calling OpenAI matching for user %s with %d jobs", user_id, len(jobs))
-    raw_results = call_openai_matching(prompt)
+    payload = {
+        "user_profile": _build_candidate_data(user),
+        "jobs":         _build_jobs_data(jobs),
+    }
 
-    job_map = {str(job.id): job for job in jobs}
+    logger.info("CACHE MISS — calling OpenAI for user %s with %d jobs", user_id, len(jobs))
+    raw_results = match_jobs(payload)
+
+    if not raw_results:
+        logger.warning("OpenAI returned no results for user %s", user_id)
+        return list(JobMatch.objects.filter(user=user).order_by("-match_score"))
+
+    logger.info(
+        "OpenAI returned job_ids: %s",
+        [item["job_id"] for item in raw_results],
+    )
+
+    now = timezone.now()
     saved_matches = []
+    saved_job_ids = []
 
-    for item in raw_results:
-        job_id = item.get("job_id")
-        score = item.get("match_score")
+    with transaction.atomic():
+        for item in raw_results:
+            job_id = item["job_id"]
+            score  = item["match_score"]  # already 0-1, normalised by parser
 
-        if not job_id or score is None:
-            logger.warning("Skipping malformed result item: %s", item)
-            continue
+            if job_id not in job_map:
+                logger.warning(
+                    "Returned job_id %s not in candidate set — skipping. "
+                    "Candidate ids: %s",
+                    job_id, list(job_map.keys()),
+                )
+                continue
 
-        if job_id not in job_map:
-            logger.warning("Returned job_id %s not in candidate set, skipping", job_id)
-            continue
+            match, created = JobMatch.objects.update_or_create(
+                user=user,
+                job=job_map[job_id],
+                defaults={
+                    "match_score":   score,
+                    "reason":        item["reason"],
+                    "calculated_at": now,
+                },
+            )
+            saved_matches.append(match)
+            saved_job_ids.append(job_map[job_id].id)
+            logger.debug("Saved match (%s): job=%s score=%.4f", "new" if created else "updated", job_id, score)
 
-        score = max(0.0, min(100.0, float(score))) / 100.0
-        reason = str(item.get("reason", ""))[:500]
+        # Remove stale matches for jobs no longer in the new result set
+        stale = JobMatch.objects.filter(user=user).exclude(job__id__in=saved_job_ids)
+        stale_count = stale.count()
+        if stale_count:
+            stale.delete()
+            logger.info("Removed %d stale matches for user %s", stale_count, user_id)
 
-        match, created = JobMatch.objects.update_or_create(
-            user=user,
-            job=job_map[job_id],
-            defaults={"match_score": score, "reason": reason, "calculated_at": timezone.now()},
-        )
-        saved_matches.append(match)
-        logger.debug("%s match: job=%s score=%.1f", "Created" if created else "Updated", job_id, score)
-
-    logger.info("Saved %d matches for user %s", len(saved_matches), user_id)
+    logger.info("Saved %d fresh matches for user %s", len(saved_matches), user_id)
     return saved_matches

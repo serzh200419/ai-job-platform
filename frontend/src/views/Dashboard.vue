@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { getCurrentUser } from '../services/auth'
-import { getMatches, refreshMatches, getJobs, type JobMatch, type Job } from '../services/api'
+import { getRecommended, refreshRecommended, type JobMatch } from '../services/api'
 import AppLayout from '../components/AppLayout.vue'
 import JobCard from '../components/JobCard.vue'
 import Loader from '../components/Loader.vue'
@@ -10,7 +10,6 @@ import Loader from '../components/Loader.vue'
 const router = useRouter()
 const user = ref<any>(null)
 const matches = ref<JobMatch[]>([])
-const fallbackJobs = ref<Job[]>([])
 const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
@@ -25,9 +24,7 @@ const greeting = computed(() => {
 })
 
 const displayJobs = computed(() =>
-  matches.value.length
-    ? matches.value.slice(0, 6).map((m) => m.job)
-    : fallbackJobs.value.slice(0, 6)
+  matches.value.slice(0, 6).map((m) => m.job)
 )
 
 const matchMap = computed(() => {
@@ -57,17 +54,12 @@ onMounted(async () => {
   try {
     const [userData, matchData] = await Promise.all([
       getCurrentUser(),
-      getMatches().catch(() => ({ results: [], last_updated: null, is_stale: true })),
+      getRecommended().catch(() => ({ results: [], last_updated: null, is_stale: true })),
     ])
     user.value = userData
     matches.value = matchData.results
     lastUpdated.value = matchData.last_updated
     isStale.value = matchData.is_stale
-
-    if (!matchData.results.length) {
-      const jobData = await getJobs()
-      fallbackJobs.value = jobData.results
-    }
   } catch {
     error.value = 'Failed to load dashboard data.'
   } finally {
@@ -77,12 +69,12 @@ onMounted(async () => {
 
 async function doRefresh() {
   refreshing.value = true
+  error.value = ''
   try {
-    const data = await refreshMatches()
+    const data = await refreshRecommended()
     matches.value = data.results
     lastUpdated.value = data.last_updated
     isStale.value = false
-    fallbackJobs.value = []
   } catch {
     error.value = 'Matching service temporarily unavailable. Please try again.'
   } finally {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { logout } from '../services/auth'
 
@@ -7,6 +7,16 @@ defineProps<{ user?: { email: string } | null }>()
 
 const router = useRouter()
 const dropdownOpen = ref(false)
+const dropdownRef = ref<HTMLElement | null>(null)
+
+function handleOutsideClick(e: MouseEvent) {
+  if (dropdownRef.value && !dropdownRef.value.contains(e.target as Node)) {
+    dropdownOpen.value = false
+  }
+}
+
+onMounted(() => document.addEventListener('mousedown', handleOutsideClick))
+onUnmounted(() => document.removeEventListener('mousedown', handleOutsideClick))
 
 function handleLogout() {
   logout()
@@ -36,7 +46,7 @@ function getInitials(email: string) {
       </button>
 
       <!-- Profile dropdown -->
-      <div class="relative" @click.outside="dropdownOpen = false">
+      <div class="relative" ref="dropdownRef">
         <button
           @click="dropdownOpen = !dropdownOpen"
           class="flex items-center gap-2.5 pl-1 pr-3 py-1 rounded-xl hover:bg-slate-100 transition-colors"
