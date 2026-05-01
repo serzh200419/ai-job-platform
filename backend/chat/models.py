@@ -9,6 +9,7 @@ class ChatSession(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="chat_sessions"
     )
+    profile_summary = models.TextField(blank=True)
     started_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -34,3 +35,17 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"[{self.sender}] {self.message[:60]}"
+
+
+class LawDocument(models.Model):
+    title       = models.CharField(max_length=500, blank=True)
+    content     = models.TextField()
+    embedding   = models.JSONField(default=list)
+    chunk_index = models.PositiveIntegerField(default=0)
+    created_at  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["chunk_index"]
+
+    def __str__(self):
+        return f"{self.title or 'LawDoc'} [{self.chunk_index}]"

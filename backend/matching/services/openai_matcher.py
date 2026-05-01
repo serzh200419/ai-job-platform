@@ -234,7 +234,7 @@ def _parse_response(raw_text: str, valid_ids: set | None = None) -> list[dict]:
         validated.append({
             "job_id":      job_id,
             "match_score": score_float,
-            "reason":      str(item.get("reason", ""))[:500],
+            "reason": str(item.get("reason", ""))[:500],
         })
 
     if skipped:

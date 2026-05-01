@@ -167,6 +167,7 @@ def match_jobs_for_user(user_id, force: bool = False):
 
     jobs = list(
         Job.objects
+        .filter(is_active=True)
         .select_related("company")
         .prefetch_related("skills")
         .order_by("-created_at")[:50]

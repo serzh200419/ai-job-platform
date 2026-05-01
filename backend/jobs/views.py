@@ -10,7 +10,7 @@ class JobListView(generics.ListAPIView):
     serializer_class = JobListSerializer
 
     def get_queryset(self):
-        qs = Job.objects.select_related("company").prefetch_related("skills")
+        qs = Job.objects.filter(is_active=True).select_related("company").prefetch_related("skills")
         job_type = self.request.query_params.get("type")
         location = self.request.query_params.get("location")
         search = self.request.query_params.get("search")

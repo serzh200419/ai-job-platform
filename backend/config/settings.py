@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "chat",
     "documents",
     "matching",
+    "scraper",
 ]
 
 MIDDLEWARE = [
@@ -100,7 +101,7 @@ SIMPLE_JWT = {
 CORS_ALLOW_ALL_ORIGINS = True
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_PROMPT_ID = os.environ.get("OPENAI_PROMPT_ID", "")
+OPENAI_CHAT_PROMPT_ID = os.environ.get("OPENAI_CHAT_PROMPT_ID", "")
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
@@ -109,3 +110,20 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "loggers": {
+        "scraper": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}

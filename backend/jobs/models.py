@@ -34,7 +34,10 @@ class Job(models.Model):
     salary_min = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     salary_max = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     location = models.CharField(max_length=255, blank=True)
-    job_type = models.CharField(max_length=20, choices=JobType.choices, default=JobType.ONSITE)
+    job_type   = models.CharField(max_length=20, choices=JobType.choices, default=JobType.ONSITE)
+    source_url = models.URLField(unique=True, null=True, blank=True)
+    end_date   = models.DateField(null=True, blank=True)
+    is_active  = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

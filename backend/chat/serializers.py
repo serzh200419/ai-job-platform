@@ -36,4 +36,5 @@ class ChatSessionListSerializer(serializers.ModelSerializer):
 
 class SendMessageSerializer(serializers.Serializer):
     session_id = serializers.UUIDField()
-    message = serializers.CharField(min_length=1)
+    message    = serializers.CharField(min_length=1)
+    job_id     = serializers.UUIDField(required=False, allow_null=True)

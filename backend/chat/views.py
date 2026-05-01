@@ -10,6 +10,7 @@ from .serializers import (
     ChatSessionSerializer,
     SendMessageSerializer,
 )
+from .services.ai_service import generate_ai_reply
 
 
 class ChatSessionCreateView(APIView):
@@ -55,11 +56,13 @@ class ChatMessageCreateView(APIView):
             message=serializer.validated_data["message"],
         )
 
-        # Placeholder AI response — replace with real AI integration
+        job_id  = serializer.validated_data.get("job_id")
+        ai_text = generate_ai_reply(request.user, user_msg.message, session, job_id=job_id)
+
         ai_reply = ChatMessage.objects.create(
             session=session,
             sender=ChatMessage.Sender.AI,
-            message="I'm processing your request. AI integration coming soon.",
+            message=ai_text,
         )
 
         from .serializers import ChatMessageSerializer

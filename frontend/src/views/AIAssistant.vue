@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted } from 'vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import AppLayout from '../components/AppLayout.vue'
 import Button from '../components/Button.vue'
 import Loader from '../components/Loader.vue'
@@ -100,6 +102,10 @@ async function scrollDown() {
 function formatTime(dateStr: string) {
   return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
+
+function renderMarkdown(text: string): string {
+  return DOMPurify.sanitize(marked.parse(text) as string)
+}
 </script>
 
 <template>
@@ -169,9 +175,15 @@ function formatTime(dateStr: string) {
                   :class="[
                     'px-4 py-3 rounded-2xl text-sm leading-relaxed',
                     msg.sender === 'ai'
-                      ? 'bg-slate-50 text-slate-700 rounded-tl-sm border border-slate-100'
+                      ? 'bg-slate-50 text-slate-700 rounded-tl-sm border border-slate-100 prose prose-sm max-w-none'
                       : 'bg-indigo-600 text-white rounded-tr-sm',
                   ]"
+                  v-if="msg.sender === 'ai'"
+                  v-html="renderMarkdown(msg.message)"
+                />
+                <div
+                  v-else
+                  class="px-4 py-3 rounded-2xl text-sm leading-relaxed bg-indigo-600 text-white rounded-tr-sm"
                 >
                   {{ msg.message }}
                 </div>

@@ -6,6 +6,11 @@ djangorestframework-simplejwt==5.5.0
 sqlparse==0.5.5
 tzdata==2025.3
 PyJWT==2.10.1
-openai>=1.0.0
+openai>=1.66.0
 python-dotenv>=1.0.0
 faker>=24.0.0
+beautifulsoup4>=4.12
+selenium>=4.0
+webdriver-manager>=4.0
+undetected-chromedriver>=3.5
+pypdf>=3.0
