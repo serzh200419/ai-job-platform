@@ -71,10 +71,14 @@ def search_similar(query: str, top_k: int = 3) -> list[str]:
 
 def build_law_context(message: str) -> str:
     if not is_legal_query(message):
+        print("[RAG] No legal keywords detected — skipping embedding search.")
         return ""
 
+    print("[RAG] Legal query detected — searching embeddings...")
     chunks = search_similar(message, top_k=3)
     if not chunks:
+        print("[RAG] No matching chunks found in LawDocument table.")
         return ""
 
+    print(f"[RAG] Retrieved {len(chunks)} chunk(s). Preview: {chunks[0][:120]!r}")
     return "\n\n---\n\n".join(chunks)
