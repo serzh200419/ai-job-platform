@@ -158,14 +158,22 @@ function goToJob(id: string) {
         <div class="bg-white rounded-xl border border-slate-100 p-4 shadow-sm">
           <router-link to="/profile" class="block">
             <p class="text-xs text-slate-500 font-medium">Profile</p>
-            <p class="text-2xl font-bold text-slate-800 mt-1">→</p>
+            <div class="mt-1 flex items-center justify-center w-10 h-10 rounded-full bg-amber-50">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-amber-500" viewBox="0 0 24 24" fill="currentColor">
+                <path fill-rule="evenodd" d="M7.5 6a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0ZM3.751 20.105a8.25 8.25 0 0 1 16.498 0 .75.75 0 0 1-.437.695A18.683 18.683 0 0 1 12 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 0 1-.437-.695Z" clip-rule="evenodd" />
+              </svg>
+            </div>
             <p class="text-xs mt-1 font-medium text-amber-500">Update skills</p>
           </router-link>
         </div>
         <div class="bg-white rounded-xl border border-slate-100 p-4 shadow-sm">
           <router-link to="/ai" class="block">
             <p class="text-xs text-slate-500 font-medium">AI Assistant</p>
-            <p class="text-2xl font-bold text-slate-800 mt-1">→</p>
+            <div class="mt-1 flex items-center justify-center w-10 h-10 rounded-full bg-indigo-50">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-indigo-500" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z" />
+              </svg>
+            </div>
             <p class="text-xs mt-1 font-medium text-indigo-500">Ask anything</p>
           </router-link>
         </div>
